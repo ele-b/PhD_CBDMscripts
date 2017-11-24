@@ -1,0 +1,95 @@
+#!/bin/csh -f
+
+mkdir 3PM
+
+if (-e 3PM/3pm_dmx.opt && -e 3PM/3pm_vmx.opt && -e 3PM/3pm_dvmx.opt) goto skip
+cp $HOME/Projects/lib/Radiance/3pm_dmx.opt 3PM/3pm_dmx.opt
+cp $HOME/Projects/lib/Radiance/3pm_vmx.opt 3PM/3pm_vmx.opt
+cp $HOME/Projects/lib/Radiance/3pm_dvmx.opt 3PM/3pm_dvmx.opt
+skip:
+
+echo 'RADIANCE AMBIENT PARAMETERS FOR THE 3-PHASE METHOD (VMX):'
+cat 3PM/3pm_vmx.opt 
+echo ''
+echo 'RADIANCE AMBIENT PARAMETERS FOR THE 3-PHASE METHOD (DMX):'
+cat 3PM/3pm_dmx.opt
+echo ''
+
+mkdir 3PM/vmx
+mkdir 3PM/dmx
+mkdir 3PM/ill
+
+oconv -f $MAT $MOD >! 3PM/$PRJ.oct
+
+cd 3PM
+
+# black model for the direct component only
+echo void plastic black 0 0 5 0 0 0 0 0 >! $PRJ-black.rad
+xform -m black ../$PRJ/*.rad >> $PRJ-black.rad
+cat ../$PRJ/*.win >> $PRJ-black.rad
+
+foreach w ( ../$WINDOWS/*.isurf )
+	set wn = $w:t:r
+
+	# Daylight matrix
+        printf "#@rfluxmtx h=kf u=Z" >! dmx/$wn-eglow.rad
+        printf "\nvoid plastic black 0 0 5 0 0 0 0 0\n" >> dmx/$wn-eglow.rad
+        xform -m black ../$WINDOWS/$wn.esurf >> dmx/$wn-eglow.rad
+        printf "#@rfluxmtx h=kf u=Z" >! dmx/$wn-eglow-d.rad
+        printf "\nvoid plastic black 0 0 5 0 0 0 0 0\n" >> dmx/$wn-eglow-d.rad
+        xform -m black ../$WINDOWS/$wn.esurf >> dmx/$wn-eglow-d.rad
+
+        setenv T0DC_3PM `date '+%s'`
+        rfluxmtx -n 4 -fff @3pm_dmx.opt -c 10000 dmx/$wn-eglow.rad $HOME/Projects/lib/Radiance/3pm_skies/MF$M.sky -i $PRJ.oct >! dmx/$PRJ-MF$M-$wn.dmx
+        setenv T1DC_3PM `date '+%s'`
+
+        setenv T0DC_5PM `date '+%s'`
+        rfluxmtx -n 4 -fff @3pm_dmx.opt -ab 0 -c 10000 dmx/$wn-eglow-d.rad $HOME/Projects/lib/Radiance/3pm_skies/MF$M.sky ../$MAT $PRJ-black.rad >! dmx/$PRJ-MF$M-$wn-d.dmx
+        setenv T1DC_5PM `date '+%s'`
+
+	# View matrix
+	printf "#@rfluxmtx h=kf u=Z o=vmx/$PRJ-$wn.vmx" >! vmx/$wn-iglow.rad
+	printf "\nvoid glow w_glow 0 0 4 1 1 1 0 \n" >> vmx/$wn-iglow.rad
+	xform -m w_glow ../$WINDOWS/$wn.isurf >> vmx/$wn-iglow.rad
+        printf "#@rfluxmtx h=kf u=Z o=vmx/$PRJ-$wn-d.vmx" >! vmx/$wn-iglow-d.rad
+        printf "\nvoid glow w_glow 0 0 4 1 1 1 0 \n" >> vmx/$wn-iglow-d.rad
+        xform -m w_glow ../$WINDOWS/$wn.isurf >> vmx/$wn-iglow-d.rad
+
+	setenv T2DC_3PM `date '+%s'`
+	rfluxmtx -n 4 -I+ @3pm_vmx.opt -y `wc -l < ../$GRID` < ../$GRID - vmx/$wn-iglow.rad -i $PRJ.oct
+	setenv T3DC_3PM `date '+%s'`
+
+	setenv T2DC_5PM `date '+%s'`
+	rfluxmtx -n 4 -faa -I+ @3pm_dvmx.opt -y `wc -l < ../$GRID` < ../$GRID - vmx/$wn-iglow-d.rad ../$MAT $PRJ-black.rad
+	setenv T3DC_5PM `date '+%s'`
+
+	#TODO the bsdf function could be different depending on the orientations, create one for each
+	rmtxop vmx/$PRJ-$wn.vmx $GLAZ3 dmx/$PRJ-MF$M-$wn.dmx ../$SMX | rmtxop -fa -c 47.4 119.9 11.6 - >! ill/$PRJ-$CLIM-MF$M-t$T-$R-$wn.ill
+	rmtxop vmx/$PRJ-$wn-d.vmx $GLAZ3 dmx/$PRJ-MF$M-$wn-d.dmx ../$SMXD | rmtxop -fa -c 47.4 119.9 11.6 - >! ill/$PRJ-$CLIM-MF$M-t$T-$R-$wn-d.ill
+
+	if (! -e ill/$PRJ-$CLIM-MF$M-t$T-$R.ill ) then
+		mv ill/$PRJ-$CLIM-MF$M-t$T-$R-$wn.ill ill/$PRJ-$CLIM-MF$M-t$T-$R.ill
+	else
+		rmtxop -fa ill/$PRJ-$CLIM-MF$M-t$T-$R-$wn.ill + ill/$PRJ-$CLIM-MF$M-t$T-$R.ill >! ill/$PRJ-$CLIM-MF$M-t$T-$R.ill
+	endif
+
+        if (! -e ill/$PRJ-$CLIM-MF$M-t$T-$R-d.ill ) then
+                mv ill/$PRJ-$CLIM-MF$M-t$T-$R-$wn-d.ill ill/$PRJ-$CLIM-MF$M-t$T-$R-d.ill
+        else
+                rmtxop -fa ill/$PRJ-$CLIM-MF$M-t$T-$R-$wn-d.ill + ill/$PRJ-$CLIM-MF$M-t$T-$R-d.ill >! ill/$PRJ-$CLIM-MF$M-t$T-$R-d.ill
+        endif
+end	
+
+cd ..
+
+# ================================ Elapsed Time Log ============================
+mkdir logs
+if (! -e logs/$PRJ-MF$M-t$T-$R.log) then
+echo `date` > logs/$PRJ-MF$M-t$T-$R.log
+else
+echo `date` >> logs/$PRJ-MF$M-t$T-$R.log
+endif
+printf "\n3PM\n" >> logs/$PRJ-MF$M-t$T-$R.log ; cat 3PM/3pm_vmx.opt >> logs/$PRJ-MF$M-t$T-$R.log
+@ TDC_3PM = $T1DC_3PM - $T0DC_3PM + $T3DC_3PM - $T2DC_3PM ; printf "\n$TDC_3PM\n" >> logs/$PRJ-MF$M-t$T-$R.log
+printf "\n5PM\n" >> logs/$PRJ-MF$M-t$T-$R.log ; cat 3PM/3pm_dvmx.opt >> logs/$PRJ-MF$M-t$T-$R.log
+@ TDC_5PM = $TDC_3PM + $T1DC_5PM - $T0DC_5PM + $T3DC_5PM - $T2DC_5PM ; printf "\n$TDC_5PM" >> logs/$PRJ-MF$M-t$T-$R.log

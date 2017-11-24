@@ -1,0 +1,26 @@
+#!/bin/csh -f
+
+mkdir clim
+
+if (! -e $PCLIM/$CLIM/$CLIM-t$T.wea) then
+if ( $T == 60) then
+echo 'A HOURLY wea file will be created from the epw file'
+epw2wea $PCLIM/$CLIM/$CLIM.*.epw $PCLIM/$CLIM/$CLIM-t60.wea
+else
+echo 'The subhourly wea file needs to be created manually'
+endif
+endif
+
+if (-e clim/$CLIM-MF$M-t$T-$R.smx && -e clim/$CLIM-MF$M-t$T-$R-d.smx) goto skip
+gendaymtx -m $M -r $R $PCLIM/$CLIM/$CLIM-t$T.wea > clim/$CLIM-MF$M-t$T-$R.smx
+gendaymtx -d -m $M -r $R $PCLIM/$CLIM/$CLIM-t$T.wea > clim/$CLIM-MF$M-t$T-$R-d.smx
+skip:
+
+#gensky 9 21 12 | genskyvec -m $M > clim/9_21_h12.skv
+#gensky 6 21 12 | genskyvec -m $M > clim/6_21_h12.skv
+#gensky 12 21 12 | genskyvec -m $M > clim/12_21_h12.skv
+
+#gensky 9 21 12 | genskyvec -m $M -d > clim/9_21_h12-d.skv
+#gensky 6 21 12 | genskyvec -m $M -d > clim/6_21_h12-d.skv
+#gensky 12 21 12 | genskyvec -m $M -d > clim/12_21_h12-d.skv
+

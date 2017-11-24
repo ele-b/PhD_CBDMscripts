@@ -1,0 +1,65 @@
+#!/bin/csh -f
+
+if (! -d 3PM ) echo "You need to run the 3-phase method first!"
+if ($THICK == 0) then
+        echo "The system should have a thickness with this method"
+        goto skip_wrongthick
+endif
+
+mkdir 5PM
+
+if (-e 5PM/5pm_dsc.opt) goto skip
+cp $HOME/Projects/lib/Radiance/5pm_dsc.opt 5PM/5pm_dsc.opt
+skip:
+
+echo "RADIANCE AMBIENT PARAMETERS FOR THE 5-PHASE METHOD (DSC):"
+cat 5PM/5pm_dsc.opt
+
+mkdir 5PM/dmx
+mkdir 5PM/ill
+
+if (-e clim/$CLIM-MF6-t$T-$R.dsx) goto skips
+gendaymtx -h -5 0.533 -d -m 6 -r $R $PCLIM/$CLIM/$CLIM-t$T.wea > clim/$CLIM-MF6-t$T-$R.dsx
+skips:
+
+cd 5PM
+
+# black model for the direct component only
+echo void plastic black 0 0 5 0 0 0 0 0 >! $PRJ-black.rad
+xform -m black ../$PRJ/*.rad >> $PRJ-black.rad
+cat ../$PRJ/*.win >> $PRJ-black.rad
+
+mkdir bsdf
+foreach w ( ../$WINDOWS/*.isurf)
+	set wn = $w:r:t
+
+	# creating the bsdf definition for the direct sun matrix
+	echo void BSDF BSDFproxy 6 $THICK $GLAZ5 0 0 1 . 0 0 >! bsdf/glazing_bsdf_$wn.rad
+	xform -m BSDFproxy ../$WINDOWS/$wn.isurf >> bsdf/glazing_bsdf_$wn.rad
+
+	# Direct sun ill matrix
+	oconv -f ../$MAT $PRJ-black.rad ../$WINDOWS/*.rad bsdf/glazing_bsdf_$wn.rad $HOME/Projects/lib/Radiance/5pm_suns.rad > $PRJ-suns-$wn.oct
+
+	setenv T4DC_5PM `date '+%s'`
+	rcontrib -n 4 -I+ @5pm_dsc.opt -faa -e MF:6 -f reinhart.cal -b rbin -bn Nrbins -o dmx/solarDC-MF6-$wn.dsc -m solar $PRJ-suns-$wn.oct < ../$GRID
+	setenv T5DC_5PM `date '+%s'`
+
+	dctimestep -n $YHR dmx/solarDC-MF6-$wn.dsc ../clim/$CLIM-MF6-t$T-$R.dsx | rmtxop -fa -c 47.4 119.9 11.6 - >! ill/$PRJ-$CLIM-MF6-t$T-$R-$wn-sun.ill
+
+        if (! -e ill/$PRJ-$CLIM-MF6-t$T-$R-sun.ill ) then
+                mv ill/$PRJ-$CLIM-MF6-t$T-$R-$wn-sun.ill ill/$PRJ-$CLIM-MF6-t$T-$R-sun.ill
+        else
+                rmtxop -fa ill/$PRJ-$CLIM-MF6-t$T-$R-$wn-sun.ill + ill/$PRJ-$CLIM-MF6-t$T-$R-sun.ill >! ill/$PRJ-$CLIM-MF6-t$T-$R-sun.ill
+        endif
+end
+
+# Final ill matrix
+rmtxop -fa ../3PM/ill/$PRJ-$CLIM-MF$M-t$T-$R.ill + -s -1 ../3PM/ill/$PRJ-$CLIM-MF$M-t$T-$R-d.ill + ill/$PRJ-$CLIM-MF6-t$T-$R-sun.ill >! ill/$PRJ-$CLIM-MF$M-t$T-$R.ill
+
+cd ..
+
+# ================================ Elapsed Time Log ============================
+printf '\n' >> logs/$PRJ-MF$M-t$T-$R.log ; @ TDC_5PM = $T5DC_5PM - $T4DC_5PM ; echo $TDC_5PM >> logs/$PRJ-MF$M-t$T-$R.log
+
+
+skip_wrongthick:

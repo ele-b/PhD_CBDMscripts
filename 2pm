@@ -1,0 +1,54 @@
+#!/bin/csh -f
+
+mkdir 2PM
+if (-e 2PM/2pm.opt && -e 2PM/2pm_d.opt) goto skip
+cp $HOME/Projects/lib/Radiance/2pm.opt 2PM/2pm.opt
+cp $HOME/Projects/lib/Radiance/2pm_d.opt 2PM/2pm_d.opt
+skip:
+
+mkdir 2PM/dc
+mkdir 2PM/ill
+
+oconv -f $HOME/Projects/lib/Radiance/whitefull.sky $MAT $MOD $WINDOWS/*.rad >! 2PM/$PRJ.oct
+echo void plastic black 0 0 5 0 0 0 0 0 >! 2PM/$PRJ-black.rad
+xform -m black $PRJ/*.rad >> 2PM/$PRJ-black.rad
+cat $PRJ/*.win >> 2PM/$PRJ-black.rad
+oconv -f $HOME/Projects/lib/Radiance/whitefull.sky $MAT 2PM/$PRJ-black.rad $WINDOWS/*.rad >! 2PM/$PRJ-d.oct
+
+
+printf "\n(2PM) Calculating global Daylight Coefficients...\n"
+cat 2PM/2pm.opt
+set T0DC_2PM = `date '+%s'` 
+rcontrib -n 4 @2PM/2pm.opt -I+ -e MF:$M -f reinhart.cal -b rbin -bn Nrbins -o 2PM/dc/$PRJ-MF$M.dc -m sky_glow 2PM/$PRJ.oct < $GRID
+set T1DC_2PM = `date '+%s'`       
+
+printf "\n(2PM) Calculating direct sunlight Daylight Coefficients...\n"
+cat 2PM/2pm_d.opt
+rcontrib -n 4 @2PM/2pm_d.opt -I+ -e MF:$M -f reinhart.cal -b rbin -bn Nrbins -o 2PM/dc/$PRJ-MF$M-d.dc -m sky_glow 2PM/$PRJ-d.oct < $GRID  # for the direct sunlight only calculation, does the model need to be black? Apparently it doesn't matter, the results are the same. But just to be on the safe side, I'll keep it black
+
+printf "\n(2PM) Calculating global illuminance...\n"
+rmtxop -fa $SMX | tail -n +9 | dctimestep -n $YHR 2PM/dc/$PRJ-MF$M.dc | rmtxop -fa -c 47.4 119.9 11.6 - >! 2PM/ill/$PRJ-$CLIM-MF$M-t$T-$R.ill
+printf "\n(2PM) Calculating direct illuminance...\n"
+rmtxop -fa $SMXD | tail -n +9 | dctimestep -n $YHR 2PM/dc/$PRJ-MF$M-d.dc | rmtxop -fa -c 47.4 119.9 11.6 - >! 2PM/ill/$PRJ-$CLIM-MF$M-t$T-$R-d.ill
+
+# ================================ Elapsed Time Log ============================
+mkdir logs
+if (! -e logs/$PRJ-MF$M-t$T-$R.log) then
+echo `date` > logs/$PRJ-MF$M-t$T-$R.log
+else
+echo `date` >> logs/$PRJ-MF$M-t$T-$R.log
+endif
+printf "\n2PM\n" >> logs/$PRJ-MF$M-t$T-$R.log ; cat 2PM/2pm.opt >> logs/$PRJ-MF$M-t$T-$R.log
+@ TDC_2PM = $T1DC_2PM - $T0DC_2PM ; printf "\n$TDC_2PM\n" >> logs/$PRJ-MF$M-t$T-$R.log
+
+#if ($VIEW == 'YES') then
+#mkdir 2PM/images
+#mkdir 2PM/images/patches
+
+#printf "\n(2PM) Generating the images for a clear sky...\n"
+#vwrays -ff -x $DIMS -y $DIMS -vf $VF | rcontrib -n 4 @2PM/2pm.opt -ffc `vwrays -d -x $DIMS -y $DIMS -vf $VF` -e MF:$M -f reinhart.cal -b rbin -bn Nrbins -o 2PM/images/patches/p%03d.hdr -m sky_glow 2PM/$PRJ.oct
+#dctimestep 2PM/images/patches/p%03d.hdr clim/9_21_h12.skv >! 2PM/images/9_21_h12_clear.hdr
+#dctimestep 2PM/images/patches/p%03d.hdr clim/6_21_h12.skv >! 2PM/images/6_21_h12_clear.hdr
+#dctimestep 2PM/images/patches/p%03d.hdr clim/12_21_h12.skv >! 2PM/images/12_21_h12_clear.hdr
+
+#endif

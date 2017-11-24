@@ -1,0 +1,90 @@
+#!/bin/csh -f
+
+setenv PRJ 'L3-v01'	# project name
+setenv M 2		# sky subdivision (e.g. MF:2)
+setenv T 60		# time step
+setenv MOD $PRJ.rad     # model description
+setenv MAT $PRJ.mat	# model materials description (opaque)
+setenv GRID Grid/$PRJ.pts	# sensor grid
+setenv WINDOWS $PRJ/Windows	# glazing materials description
+
+setenv occ 'YES'	# occupancy schedule
+setenv h0 8    # scheduled start time !! to be corrected for fractions of hour !!
+setenv h1 18     # scheduled end time
+
+setenv da_lux 300    # Daylight Autonomy threshold
+setenv ase_lux 1000     # Annual Sunlight Exposure threshold
+setenv sda_time 50    # spatial Daylight Autonomy threshold (%)
+setenv udi_1 100    # UDI-s threshold
+setenv udi_2 300    # UDI-a threshold
+setenv udi_3 3000    # UDI-x threshold
+
+#- set the relative rotation for the luminance distribution function
+foreach r ( 000 045 090 135 180 225 270 315 )
+#foreach r ( 045 )
+setenv R $r
+
+# set the transmission matrix description for 3PM and 5PM
+setenv GLAZ3 $HOME/Projects/data/glazings/doubleclear80/doubleclear_w6.xml
+setenv GLAZ5 $HOME/Projects/data/glazings/doubleclear80/doubleclear_t45.xml
+setenv THICK 0
+setenv PROXY 'N'  # can be Y(ES) only if THICK != 0
+
+# set the climate files location and create the sky luminance matrix
+setenv PCLIM $HOME/Projects/data/climate/velux_2010
+foreach clim (GBR_London)
+	setenv CLIM $clim
+	echo Creating the sky matrices for $clim...
+	csh $HOME/Projects/lib/Radiance/do_clim
+	setenv SMX clim/$clim-MF$M-t$T-$r.smx
+	setenv SMXD clim/$clim-MF$M-t$T-$r-d.smx
+
+@ hfac = 60 / $T
+@ yhours = $hfac * 24 * 365
+setenv YHR $yhours
+
+# run the simulations
+setenv PLOT 'YES'
+setenv VIEW 'YES'
+if ($VIEW == 'YES') then 
+	setenv DIMS 100 
+	setenv VF 'views/back.vf'
+endif
+
+# ================================ 2-phase method ==============================
+setenv MET '2PM'
+csh $HOME/Projects/lib/Radiance/2pm 
+python $HOME/Projects/lib/python/ill2mets.py 
+# ================================ 3-phase method ==============================
+setenv MET '3PM'
+if ($THICK == 0) then
+        csh $HOME/Projects/lib/Radiance/3pm
+else
+        csh $HOME/Projects/lib/Radiance/3pm_shades
+endif
+python $HOME/Projects/lib/python/ill2mets.py
+# ================================ 5-phase method ==============================
+setenv MET '5PM'
+if ($THICK == 0) then
+        csh $HOME/Projects/lib/Radiance/5pm
+else
+	if ($PROXY == 'Y'):
+		csh $HOME/Projects/lib/Radiance/5pm_shades
+	else:
+		csh $HOME/Projects/lib/Radiance/5pm
+endif
+set lines = `wc -l < $MET/ill/$PRJ-$CLIM-MF$M-t$T-$R.ill`
+setenv LINES $lines
+python $HOME/Projects/lib/python/ill2mets.py 
+
+end
+
+end
+
+# ================================ Daylight Factor =============================
+csh $HOME/Projects/lib/Radiance/DFcalc 
+
+# unobstructed sensor point under the same sky conditions (obtained with gendaymtx)
+oconv -f $HOME/Projects/lib/Radiance/whitefull.sky > external.oct
+echo "0 0 0 0 0 1" | rcontrib -n 4 @2PM/2pm.opt -I+ -e MF:$M -f reinhart.cal -b rbin -bn Nrbins -o external.dc -m sky_glow external.oct
+rmtxop -fa $SMX | tail -n +9 | dctimestep -n $YHR external.dc | rmtxop -fa -c 47.4 119.9 11.6 - >! clim/$PRJ-external.ill

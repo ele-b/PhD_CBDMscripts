@@ -1,0 +1,40 @@
+#!/bin/csh -f
+
+# set the dimension in number of pixels
+set pdim  =  256
+# set the resolution for a square image
+set res =   (-x $pdim -y $pdim)
+
+unset noclobber
+
+cd /Users/eb/Desktop/Benchmarking/Model 
+
+set fn = grid_004
+set fp_grid = objects/grids/
+set oct = model.oct
+
+mkdir vfh_$fn
+mkdir sensors_$fn
+
+set i = 1
+
+while ( $i < 700 )
+
+# set the view point coordinates
+set vpx = `cat $fp_grid$fn.grd | head -$i | tail -1 | rcalc -e '$1=$1'`
+set vpy = `cat $fp_grid$fn.grd | head -$i | tail -1 | rcalc -e '$2=$2'`
+set vpz = `cat $fp_grid$fn.grd | head -$i | tail -1 | rcalc -e '$3=$3'`
+
+# generation of hemispheric fisheye (-vth) view points
+cat >! vfh_$fn/$fn$i.vf << EOC
+rvu -vth -vp $vpx $vpy $vpz -vd 0 0 1 -vu 0 1 0 -vh 180 -vv 180 -vo 0 -va 0 -vs 0 -vl 0
+EOC
+
+# generate the Radiance image sampled on every pixel (-ps 1) at its center (-pj 0)
+rpict -w -vf vfh_$fn/$fn$i.vf $res -pj 0 -ps 1 -av 1 1 1 $oct >! sensors_$fn/$fn-00$i.hdr
+
+@ i = $i + 1
+
+end
+
+

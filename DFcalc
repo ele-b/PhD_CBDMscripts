@@ -1,0 +1,21 @@
+#!/bin/csh -f
+
+mkdir ADF
+
+if (-e ADF/df.opt) goto skip
+cp /Users/eb/Projects/lib/Radiance/df.opt ADF/df.opt
+skip:
+
+oconv -f /Users/eb/Projects/lib/Radiance/CIEovc10klx.rad $MAT $MOD $WINDOWS/*.rad >! ADF/$PRJ-ovc.oct
+
+echo "RADIANCE AMBIENT PARAMETERS FOR DF CALCULATION:"
+echo ''
+cat ADF/df.opt
+echo ''
+
+rtrace -n 4 -w -h -I+ @ADF/df.opt -af ADF/$PRJ.af ADF/$PRJ-ovc.oct < $GRID | rcalc -e '$1=($1*0.265+$2*0.67+$3*0.065)*179/10000*100' > /dev/null
+rtrace -n 4 -w -h -I+ @ADF/df.opt -af ADF/$PRJ.af ADF/$PRJ-ovc.oct < $GRID | rcalc -e '$1=($1*0.265+$2*0.67+$3*0.065)*179/10000*100' >! ADF/$PRJ.df
+
+echo Average DF: `cat ADF/$PRJ.df | total -m`
+echo Average DF: `cat ADF/$PRJ.df | total -m` >! RESULTS/$PRJ-ADF.txt
+
